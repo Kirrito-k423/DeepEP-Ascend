@@ -52,12 +52,13 @@ def main():
     assert dist.get_world_size() == 64, 'This capture requires exactly 64 ranks'
     assert deep_ep._C.get_npu_arch() == 3510, 'Ascend 950/A5 is required'
     assert deep_ep._C.get_num_ai_cores() >= 32
-    output = args.output.resolve() / f'rank{rank}'
+    root = args.output.resolve()
+    output = root / f'rank{rank}'
     output.mkdir(parents=True, exist_ok=False)
     os.environ.pop('EP_DEBUG_CLOCK_DIR', None)
     os.environ.pop('EP_DEBUG_CLOCK_EMPTY', None)
     if args.clock_mode != 'off':
-        os.environ['EP_DEBUG_CLOCK_DIR'] = str(output / 'raw')
+        os.environ['EP_DEBUG_CLOCK_DIR'] = str(root / 'raw')
     if args.clock_mode == 'empty':
         os.environ['EP_DEBUG_CLOCK_EMPTY'] = '1'
     torch.manual_seed(rank)
@@ -94,7 +95,7 @@ def main():
         deep_ep._C.export_dispatch_debug_clock()
         check_output(x, idx, idx_weights, result)
         if args.clock_mode != 'off':
-            folders = sorted((output / 'raw').glob('*/rank*-launch*'))
+            folders = sorted((root / 'raw').glob(f'*/rank{rank}-pid*-launch*'))
             assert {p.parent.name for p in folders} == {'dispatch', 'dispatch_copy_epilogue'}
             assert len(folders) == 2
             sources = list((Path(deep_ep.__file__).parent / 'include/deep_ep').rglob('dispatch*.hpp'))
