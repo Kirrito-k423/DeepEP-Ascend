@@ -631,6 +631,9 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
         }
     }
     AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "padding-issued");
+    // Uncached metadata leaves MTE3->S event 0 primed; consume it before AKL reuses it.
+    if constexpr (EP_DEBUG_CLOCK != 0 and not kCachedMode)
+        if (trace_output) asc_sync_wait(PIPE_MTE3, PIPE_S, EVENT_ID0);
     finish_dispatch_trace(clock, trace_output);
 }
 
