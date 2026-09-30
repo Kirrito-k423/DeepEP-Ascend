@@ -15,6 +15,7 @@ cd DeepEP-Ascend
 git submodule update --init --recursive third-party/deep_jit third-party/ascend-kernel-lab
 source /path/to/cann/set_env.sh
 python -m pip install --no-build-isolation .
+python -m pip install -r third-party/ascend-kernel-lab/requirements.txt
 export PYTHONPATH="$PWD/third-party/ascend-kernel-lab/python:$PYTHONPATH"
 ```
 
@@ -54,7 +55,7 @@ manifest 保存实际配置、版本、AKL revision、NPU event 的 `sample_us` 
 `empty` 的原始行只有有效头部，没有事件，因此不送入语义时间线解析器。
 
 ```bash
-python -m akl.semantic results/on --keep-intermediates \
+python -m akl.semantic results/on --keep-intermediates --jobs 8 \
   --source deep_ep/include/deep_ep/impls/ep/dispatch.hpp \
            deep_ep/include/deep_ep/impls/ep/dispatch_copy_epilogue.hpp \
            deep_ep/include/deep_ep/common/dispatch_trace.hpp
