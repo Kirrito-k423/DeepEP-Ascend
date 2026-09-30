@@ -77,7 +77,8 @@ inline void init_jit(const std::string& library_root_path) {
     auto includes = std::vector{include_dir};
     const auto akl_include = library_root.parent_path() / "third-party/ascend-kernel-lab/include";
     if (std::filesystem::is_directory(akl_include)) includes.push_back(akl_include);
-    const deep_jit::Config config(library_root, "EP", {}, includes, {"deep_ep/", "akl/"});
+    // AKL uses quoted includes; pin its revision instead of passing it through the JIT parser.
+    const deep_jit::Config config(library_root, "EP", "akl-a697a16953c8d22bc5effc85c0b55b5bf3ba72a1", includes, {"deep_ep/"});
 
     jit = deep_jit::LazyInit<deep_jit::Runtime<deep_jit::Ascend>>([config] {
         return std::make_shared<deep_jit::Runtime<deep_jit::Ascend>>(config);
