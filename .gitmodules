@@ -4,3 +4,6 @@
 [submodule "third-party/deep_jit"]
 	path = third-party/deep_jit
 	url = https://github.com/deepseek-ai/DeepJIT.git
+[submodule "third-party/ascend-kernel-lab"]
+	path = third-party/ascend-kernel-lab
+	url = https://github.com/Kirrito-k423/ascend-kernel-lab.git

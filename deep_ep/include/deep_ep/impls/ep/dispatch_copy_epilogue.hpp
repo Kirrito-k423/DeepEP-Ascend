@@ -1,4 +1,5 @@
 #pragma once
+#include <deep_ep/common/dispatch_trace.hpp>
 
 #include <deep_ep/comm/barrier.hpp>
 #include <deep_ep/common/compiled.hpp>
@@ -190,17 +191,22 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
     __gm__ int* recv_src_metadata,
     const int rank_idx,
     const int recv_sf_token_stride,
-    const int recv_sf_hidden_stride
+    const int recv_sf_hidden_stride, __gm__ uint8_t* trace_output
 ) {
+    akl::Recorder<(EP_DEBUG_CLOCK != 0), 32> clock;
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "entry");
     AscendC::InitSocState();
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "soc-ready");
 
     const auto vec_core_idx = static_cast<int>(AscendC::GetBlockIdx());
     const auto workspace_layout = layout::EPWorkspaceLayout(workspace);
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "remote-wait-begin");
     if constexpr (kDoBarrier)
         comm::scalar::barrier<
             kNumRanks, kNumTimeoutCycles, true, true, true, kNumVecCores, kNumVecCores>(
                 workspace_layout.get_common_signals(), vec_core_idx, jetty_ptrs);
 
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "remote-wait-end");
     EP_STATIC_ASSERT(kNumRanks <= kNumMaxRanks);
     EP_STATIC_ASSERT(kNumExperts % kNumRanks == 0);
     EP_STATIC_ASSERT(math::is_power_of_2(kExpertAlignment));
@@ -323,6 +329,7 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
         return true;
     };
 
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "histogram-begin");
     int preload_stage_idx = 0;
 
     if constexpr (not kCachedMode) {
@@ -413,7 +420,9 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
         asc_sync_inter_arrive(PIPE_MTE3, kExpertCountCumsumBarrier);
         asc_sync_notify(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
 
+        AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "cumsum-wait-begin");
         asc_sync_inter_wait(PIPE_MTE2, kExpertCountCumsumBarrier);
+        AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "cumsum-wait-end");
         asc_sync_wait(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
         asc_copy_gm2ub_align(
             (__ubuf__ int*)ub_next_dst_slot_idx,
@@ -428,6 +437,7 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
         asc_sync_wait(PIPE_V, PIPE_S, EVENT_ID0);
     }
 
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "layout-ready");
     for (int i = preload_stage_idx; i < kNumMTEStages; ++ i) {
         issue_load(i, true);
     }
@@ -446,6 +456,7 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
     }
 
     const auto num_range_tokens = token_end_idx - token_start_idx;
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "expand-begin");
     int num_consumed_tokens = 0;
     while (num_consumed_tokens < num_range_tokens) {
         const auto num_stage_tokens = stage_num_tokens[stage_idx];
@@ -544,6 +555,7 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
         stage_idx = stage_idx + 1 == kNumMTEStages ? 0 : stage_idx + 1;
     }
 
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "expand-issued");
     if constexpr (kDoZeroPadding) {
         // Divide each expert into up to four padding parts
         static constexpr int kNumPaddingParts = math::min(4, kNumVecCores);
@@ -618,6 +630,8 @@ __global__ __vector__ void dispatch_copy_epilogue_impl(
             }
         }
     }
+    AKL_DEBUG_CLOCK(clock, "dispatch-epilogue", "padding-issued");
+    finish_dispatch_trace(clock, trace_output);
 }
 
 }  // namespace deep_ep

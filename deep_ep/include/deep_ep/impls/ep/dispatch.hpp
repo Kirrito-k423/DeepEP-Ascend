@@ -1,6 +1,7 @@
 #pragma once
 
 #include <climits>
+#include <deep_ep/common/dispatch_trace.hpp>
 
 #include <kernel_operator.h>
 #include <simt_api/device_atomic_functions.h>
@@ -569,9 +570,12 @@ __global__ __vector__ void dispatch_impl(
     const int rank_idx,
     const int num_tokens,
     const int sf_token_stride,
-    const int sf_hidden_stride) {
+    const int sf_hidden_stride, __gm__ uint8_t* trace_output) {
+    akl::Recorder<(EP_DEBUG_CLOCK != 0), 32> clock;
+    AKL_DEBUG_CLOCK(clock, "dispatch", "entry");
     // TODO(HUAWEI): kernel launch & init SoC cost 1.9 us, which is slow
     AscendC::InitSocState();
+    AKL_DEBUG_CLOCK(clock, "dispatch", "soc-ready");
 
     // Checks
     // NOTES: the one-to-many-rank Jetty is private for this vector core
@@ -648,7 +652,9 @@ __global__ __vector__ void dispatch_impl(
     if (vec_core_idx == 0)
         asc_mark_stamp<PIPE_S>(kTraceBarrierBefore);
 #endif
+    AKL_DEBUG_CLOCK(clock, "dispatch", "barrier-begin");
     comm::scalar::barrier<kNumRanks, kNumTimeoutCycles, false>(workspace_layout.get_common_signals(), vec_core_idx);
+    AKL_DEBUG_CLOCK(clock, "dispatch", "barrier-end");
 #if defined(ASCENDC_TRACE_ON)
     if (vec_core_idx == 0)
         asc_mark_stamp<PIPE_S>(kTraceBarrierAfter);
@@ -685,6 +691,7 @@ __global__ __vector__ void dispatch_impl(
         );
     }
 
+    AKL_DEBUG_CLOCK(clock, "dispatch", "simt-issued");
     auto preload_metadata = [&](const int token_idx, const int stage_idx) __aicore__ {
         const auto ub_metadata = ub_metadata_buffer.get_token_buffer(stage_idx * kNumTokensPerMetadataMTE);
         const auto num_metadata_bytes = static_cast<uint32_t>(metadata_token_layout.get_num_bytes());
@@ -766,6 +773,7 @@ __global__ __vector__ void dispatch_impl(
     for (int stage_idx = 0; stage_idx < num_active_stages; ++ stage_idx)
         preload_metadata(vec_core_idx * kNumMaxTokensPerVecCore + stage_idx * kNumTokensPerMetadataMTE, stage_idx);
 
+    AKL_DEBUG_CLOCK(clock, "dispatch", "metadata-begin");
     // Prepare metadata while SIMT computes the routing slots.
     for (int batch_idx = 0; batch_idx < num_metadata_batches; ++ batch_idx) {
         const auto stage_idx = batch_idx % kNumMetadataMTEStages;
@@ -799,10 +807,12 @@ __global__ __vector__ void dispatch_impl(
     asc_sync_notify(PIPE_MTE2, PIPE_S, EVENT_ID0);
     asc_sync_wait(PIPE_MTE2, PIPE_S, EVENT_ID0);
     ub_layout->metadata_ready = 1;
+    AKL_DEBUG_CLOCK(clock, "dispatch", "metadata-ready");
 
     while (ub_layout->local_copy_ready != 1)
         asm volatile("nop");
 
+    AKL_DEBUG_CLOCK(clock, "dispatch", "local-slots-ready");
     for (int stage_idx = 0; stage_idx < kNumHiddenMTEStages; ++ stage_idx)
         asc_sync_notify(PIPE_MTE3, PIPE_MTE2, static_cast<event_t>(stage_idx));
 
@@ -844,10 +854,12 @@ __global__ __vector__ void dispatch_impl(
     asc_sync_notify(PIPE_MTE2, PIPE_S, EVENT_ID0);
     asc_sync_wait(PIPE_MTE2, PIPE_S, EVENT_ID0);
 
+    AKL_DEBUG_CLOCK(clock, "dispatch", "local-copy-done");
     // Wait until SIMT finishes routing and count reduction
     // TODO: ring DB overlappingly
     asc_sync_notify(PIPE_V, PIPE_S, EVENT_ID0);
     asc_sync_wait(PIPE_V, PIPE_S, EVENT_ID0);
+    AKL_DEBUG_CLOCK(clock, "dispatch", "simt-done");
     if constexpr (kNumRanks > 1)
         EP_DEVICE_ASSERT(kNumMaxSQEs * kNumWQEBBsPerSQESlot <= handle::kSQDepth);
     const auto num_sqes = ub_layout->lsqe_counter;
@@ -857,11 +869,14 @@ __global__ __vector__ void dispatch_impl(
         jetty.ring_doorbell();
     }
 
+    AKL_DEBUG_CLOCK(clock, "dispatch", "doorbell-issued");
     // benchmark only: wait for all urma traffic to measure URMA latency
     if constexpr (kDoBarrier)
         comm::scalar::barrier<
             kNumRanks, kNumTimeoutCycles, true, true, true, kNumVecCores, kNumJetties>(
                 workspace_layout.get_common_signals(), vec_core_idx, jetty_ptrs);
+    AKL_DEBUG_CLOCK(clock, "dispatch", "exit");
+    finish_dispatch_trace(clock, trace_output);
 }
 
 }  // namespace deep_ep
