@@ -76,6 +76,8 @@ class CustomBuildPy(build_py):
     def prepare_agent_files(self):
         # Copy csrc into the wheel for agent-side error lookup
         package_dir = os.path.join(self.build_lib, 'deep_ep')
+        shutil.copytree(Path(current_dir) / 'third-party/ascend-kernel-lab/include/akl',
+                        Path(package_dir) / 'include/akl', dirs_exist_ok=True)
         for name in ('csrc', ):
             dst = os.path.join(package_dir, name)
             shutil.rmtree(dst, ignore_errors=True)
@@ -112,6 +114,7 @@ if __name__ == '__main__':
 
     include_dirs = [
         f'{current_dir}/csrc',
+        f'{current_dir}/third-party/ascend-kernel-lab/include',
         f'{current_dir}/deep_ep/include',
         f'{current_dir}/third-party/deep_jit/include',
         f'{ascend_home}/aarch64-linux/include',

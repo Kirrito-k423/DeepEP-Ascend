@@ -21,6 +21,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
     m.doc() = "DeepEP communication buffers (Ascend)";
     config::register_apis(m);
+    m.def("export_dispatch_debug_clock", &DispatchTrace::Export);
     m.attr("topk_idx_t") = py::cast(torch::kInt64);
 
     py::class_<EventHandle>(m, "EventHandle")

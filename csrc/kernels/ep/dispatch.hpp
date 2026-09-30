@@ -7,6 +7,7 @@
 #include <deep_ep/common/math.hpp>
 
 #include "../../runtime/jit.hpp"
+#include "../../runtime/dispatch_trace.hpp"
 
 namespace deep_ep {
 
@@ -49,7 +50,9 @@ static void launch_dispatch(void* x, void* sf,
     EP_HOST_ASSERT(16 <= num_vec_cores);
 
     // Compile
+    const DispatchTrace trace("dispatch", num_vec_cores, rank_idx);
     const auto kernel = jit->compile("dispatch", std::format(R"(
+#define EP_DEBUG_CLOCK {}
 #include <deep_ep/impls/ep/dispatch.hpp>
 
 using namespace deep_ep;
@@ -57,7 +60,7 @@ using namespace deep_ep;
 static void __instantiate_kernel() {{
     auto ptr = reinterpret_cast<void*>(&dispatch_impl<{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}>);
 }}
-)", num_ranks, num_experts, num_topk,
+)", trace.mode, num_ranks, num_experts, num_topk,
         expert_alignment, cached_mode, do_cpu_sync,
         num_vec_cores,
         num_hidden_bytes, num_sf_packs, num_max_tokens_per_rank, num_ub_bytes,
@@ -78,7 +81,7 @@ static void __instantiate_kernel() {{
         jetty_ptrs,
         rank_idx,
         num_tokens,
-        sf_token_stride, sf_hidden_stride);
+        sf_token_stride, sf_hidden_stride, trace.data);
 }
 
 static void launch_dispatch_copy_epilogue(void* buffer,
@@ -110,7 +113,9 @@ static void launch_dispatch_copy_epilogue(void* buffer,
                    (recv_sf_token_stride == num_sf_packs and recv_sf_hidden_stride == 1));
 
     // Compile
+    const DispatchTrace trace("dispatch_copy_epilogue", num_vec_cores, rank_idx);
     const auto kernel = jit->compile("dispatch_copy_epilogue", std::format(R"(
+#define EP_DEBUG_CLOCK {}
 #include <deep_ep/impls/ep/dispatch_copy_epilogue.hpp>
 
 using namespace deep_ep;
@@ -118,7 +123,7 @@ using namespace deep_ep;
 static void __instantiate_kernel() {{
     auto ptr = reinterpret_cast<void*>(&dispatch_copy_epilogue_impl<{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}>);
 }}
-)", num_ranks, num_experts, num_topk,
+)", trace.mode, num_ranks, num_experts, num_topk,
         expert_alignment, cached_mode, do_zero_padding,
         num_vec_cores,
         num_hidden_bytes, num_sf_packs,
@@ -135,7 +140,7 @@ static void __instantiate_kernel() {{
         recv_x, recv_sf, recv_topk_weights,
         recv_src_metadata,
         rank_idx,
-        recv_sf_token_stride, recv_sf_hidden_stride);
+        recv_sf_token_stride, recv_sf_hidden_stride, trace.data);
 }
 
 }  // namespace deep_ep
