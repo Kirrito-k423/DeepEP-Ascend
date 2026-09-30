@@ -110,8 +110,11 @@ def main():
                     assert not warnings and {e['block'] for e in events} == set(range(64))
                 else:
                     words = 8 + 2 * meta['capacity']
-                    rows = struct.iter_unpack(f'<{words}Q', (folder / 'trace.bin').read_bytes())
-                    assert all(r[0] == 0x414B4C5452433031 and r[2:4] == (0, 0) and r[7] == 1 for r in rows)
+                    raw = (folder / 'trace.bin').read_bytes()
+                    assert len(raw) == 64 * words * 8
+                    rows = struct.iter_unpack(f'<{words}Q', raw)
+                    assert all(r[:2] == (0x414B4C5452433031, 1) and r[2:4] == (0, 0) and r[4] == b and r[7] == 1
+                               for b, r in enumerate(rows))
         manifest.update(status='passed', precision='bitwise FP8/scales/weights/padding', sample_us=sample_us,
                         timing='NPU event; trace modes include diagnostic allocation and flush overhead')
         manifest_path.write_text(json.dumps(manifest, indent=2))
